@@ -117,10 +117,14 @@ class ImportWrapper(pr.Base):
                             extname = modname[len('flask_'):]
                             names.append(self._generate_name(extname))
                     # Now the old style: ``flaskext.foo``
-                    for dir in self._importer.sys_path_with_modifications():
-                        flaskext = os.path.join(dir, 'flaskext')
-                        if os.path.isdir(flaskext):
-                            names += self._get_module_names([flaskext])
+                    importer = get_importer(
+                        self._evaluator, ('flaskext', ), self._importer.module)
+                    try:
+                        path = importer.follow_file_system().path
+                    except ModuleNotFound:
+                        pass
+                    else:
+                        names += self._get_module_names(path)
                 if on_import_stmt and isinstance(scope, pr.Module) \
                         and scope.path.endswith('__init__.py'):
                     pkg_path = os.path.dirname(scope.path)
@@ -372,6 +376,7 @@ class _Importer(object):
                     pr.NamePart('flaskext', part.parent, pos),
                 ) + orig_path[2:]
                 return self._real_follow_file_system()
+
         return self._real_follow_file_system()
 
     def _real_follow_file_system(self):
@@ -428,6 +433,14 @@ class _Importer(object):
                 return follow_path(iter(import_path), sys.path)
         return []
 
+    def _follow_flaskext(self):
+        names = []
+        for dir in self.sys_path_with_modifications():
+            flaskext = os.path.join(dir, 'flaskext')
+            if os.path.isdir(flaskext):
+                return None, flaskext, True
+        return None, None, False
+
     def _follow_sys_path(self, sys_path):
         """
         Find a module with a path (of the module, like usb.backend.libusb10).
@@ -444,6 +457,9 @@ class _Importer(object):
                 importing = find_module(string, [path])
             else:
                 debug.dbg('search_module %s %s', string, self.file_path)
+                # Flask
+                if string == 'flaskext':
+                    return self._follow_flaskext()
                 # Override the sys.path. It works only good that way.
                 # Injecting the path directly into `find_module` did not work.
                 sys.path, temp = sys_path, sys.path
